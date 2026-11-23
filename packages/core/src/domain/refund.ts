@@ -23,6 +23,7 @@
 // its refunds ("Refunded", "Part refunded") is worked out from the refunds
 // by `linkRefundSummary`. `LinkStatus` stays as it is.
 
+import { fromStroops, isPositiveAmount, STELLAR_DECIMALS, toStroops } from "./money";
 import type { AssetRef } from "./payment-link";
 
 export const REFUND_STATUSES = [
@@ -86,4 +87,64 @@ export interface Refund {
   failureReason: string | null;
   createdAt: number; // epoch ms
   updatedAt: number;
+}
+
+/**
+ * How much of one payment can still be refunded: the payment's amount minus
+ * every refund of it that has not failed, in stroops, never below zero.
+ *
+ * A `prepared` refund counts although no money has moved yet. Otherwise two
+ * refund sheets opened at the same time would each be offered the whole
+ * amount, and both could be signed. (The API makes that reservation atomic in
+ * 4.62; this is the arithmetic it shares with the web.)
+ *
+ * `refunds` must be the refunds of this one payment.
+ */
+export function refundableAmount(
+  paymentAmount: string,
+  refunds: ReadonlyArray<Pick<Refund, "amount" | "status">>,
+): string {
+  let left = toStroops(paymentAmount);
+  for (const refund of refunds) {
+    if (refund.status === "failed") continue;
+    left -= toStroops(refund.amount);
+  }
+  return fromStroops(left > 0n ? left : 0n);
+}
+
+export type RefundAmountRejection =
+  | "invalid_amount" // not a decimal number
+  | "not_positive" // zero or negative
+  | "too_many_decimals" // more than 7, so not a whole number of stroops
+  | "exceeds_refundable"; // more than the payment has left
+
+export type RefundAmountValidation = { ok: true } | { ok: false; reason: RefundAmountRejection };
+
+const rejected = (reason: RefundAmountRejection): RefundAmountValidation => ({ ok: false, reason });
+
+// A decimal number, to tell a number that breaks a rule from text that is
+// not a number at all: an optional minus sign, digits, optional decimals.
+const DECIMAL_RE = /^(-?)\d+(?:\.(\d+))?$/;
+
+/**
+ * Checks the amount a seller asks to refund against what its payment has
+ * left, which is `refundableAmount`'s answer. The two are compared in
+ * stroops, never as floats or as strings. A `refundable` that is not a
+ * Stellar amount is a programming error and throws.
+ */
+export function validateRefundAmount(requested: string, refundable: string): RefundAmountValidation {
+  const limit = toStroops(refundable);
+  const amount = requested.trim();
+  const shape = DECIMAL_RE.exec(amount);
+  if (!shape) return rejected("invalid_amount");
+  if (shape[1] === "-") return rejected("not_positive");
+  if ((shape[2] ?? "").length > STELLAR_DECIMALS) return rejected("too_many_decimals");
+
+  // From here `amount` is a well-formed Stellar amount, so toStroops accepts it.
+  const stroops = toStroops(amount);
+  if (stroops === 0n) return rejected("not_positive");
+  // isPositiveAmount also refuses more than an account can hold, which is
+  // more than any payment has left.
+  if (!isPositiveAmount(amount) || stroops > limit) return rejected("exceeds_refundable");
+  return { ok: true };
 }
