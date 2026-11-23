@@ -5,8 +5,10 @@ import {
   assertRefundTransition,
   canTransitionRefund,
   isRefundTerminal,
+  linkRefundSummary,
   refundableAmount,
   validateRefundAmount,
+  type Refund,
   type RefundStatus,
 } from "../src/domain/refund";
 import { fromStroops, toStroops } from "../src/domain/money";
@@ -87,6 +89,7 @@ describe("the package's exports", () => {
     expect(core.assertRefundTransition).toBe(assertRefundTransition);
     expect(core.refundableAmount).toBe(refundableAmount);
     expect(core.validateRefundAmount).toBe(validateRefundAmount);
+    expect(core.linkRefundSummary).toBe(linkRefundSummary);
   });
 });
 
@@ -252,5 +255,140 @@ describe("validateRefundAmount", () => {
   it("throws when the refundable amount itself is malformed", () => {
     expect(() => validateRefundAmount("5", "lots")).toThrow();
     expect(() => validateRefundAmount("abc", "lots")).toThrow();
+  });
+});
+
+describe("linkRefundSummary", () => {
+  const TX_A = "a".repeat(64);
+  const TX_B = "b".repeat(64);
+  const payment = (txHash: string, operationId: string, amount: string) => ({ txHash, operationId, amount });
+  const refundOf = (
+    txHash: string,
+    operationId: string,
+    amount: string,
+    status: RefundStatus,
+  ): Pick<Refund, "paymentTxHash" | "paymentOperationId" | "amount" | "status"> => ({
+    paymentTxHash: txHash,
+    paymentOperationId: operationId,
+    amount,
+    status,
+  });
+
+  it("is empty for a link nobody has paid", () => {
+    expect(linkRefundSummary([], [])).toEqual({ refundedAmount: "0", pendingAmount: "0", fullyRefunded: false });
+  });
+
+  it("is empty for a paid link with no refunds", () => {
+    expect(linkRefundSummary([payment(TX_A, "1", "25")], [])).toEqual({
+      refundedAmount: "0",
+      pendingAmount: "0",
+      fullyRefunded: false,
+    });
+  });
+
+  it("reports a part refund, such as the overpaid part of a payment", () => {
+    expect(linkRefundSummary([payment(TX_A, "1", "27")], [refundOf(TX_A, "1", "2", "confirmed")])).toEqual({
+      refundedAmount: "2",
+      pendingAmount: "0",
+      fullyRefunded: false,
+    });
+  });
+
+  it("reports a full refund once it is confirmed", () => {
+    expect(linkRefundSummary([payment(TX_A, "1", "25")], [refundOf(TX_A, "1", "25", "confirmed")])).toEqual({
+      refundedAmount: "25",
+      pendingAmount: "0",
+      fullyRefunded: true,
+    });
+  });
+
+  it("reports a full refund made in parts", () => {
+    const summary = linkRefundSummary(
+      [payment(TX_A, "1", "25")],
+      [refundOf(TX_A, "1", "10", "confirmed"), refundOf(TX_A, "1", "15", "confirmed")],
+    );
+    expect(summary).toEqual({ refundedAmount: "25", pendingAmount: "0", fullyRefunded: true });
+  });
+
+  it("keeps a refund that is prepared or submitted as pending, not refunded", () => {
+    for (const status of ["prepared", "submitted"] as const) {
+      expect(linkRefundSummary([payment(TX_A, "1", "25")], [refundOf(TX_A, "1", "25", status)])).toEqual({
+        refundedAmount: "0",
+        pendingAmount: "25",
+        fullyRefunded: false,
+      });
+    }
+  });
+
+  it("adds prepared and submitted refunds together as pending", () => {
+    const summary = linkRefundSummary(
+      [payment(TX_A, "1", "25")],
+      [refundOf(TX_A, "1", "5", "confirmed"), refundOf(TX_A, "1", "3", "prepared"), refundOf(TX_A, "1", "4", "submitted")],
+    );
+    expect(summary).toEqual({ refundedAmount: "5", pendingAmount: "7", fullyRefunded: false });
+  });
+
+  it("counts a failed refund nowhere", () => {
+    expect(linkRefundSummary([payment(TX_A, "1", "25")], [refundOf(TX_A, "1", "25", "failed")])).toEqual({
+      refundedAmount: "0",
+      pendingAmount: "0",
+      fullyRefunded: false,
+    });
+  });
+
+  it("needs every payer refunded before the link is fully refunded", () => {
+    const payments = [payment(TX_A, "1", "10"), payment(TX_B, "7", "15")];
+    const one = linkRefundSummary(payments, [refundOf(TX_A, "1", "10", "confirmed")]);
+    expect(one).toEqual({ refundedAmount: "10", pendingAmount: "0", fullyRefunded: false });
+    const both = linkRefundSummary(payments, [
+      refundOf(TX_A, "1", "10", "confirmed"),
+      refundOf(TX_B, "7", "15", "confirmed"),
+    ]);
+    expect(both).toEqual({ refundedAmount: "25", pendingAmount: "0", fullyRefunded: true });
+  });
+
+  it("tells two payments in one transaction apart by their operation", () => {
+    const payments = [payment(TX_A, "1", "10"), payment(TX_A, "2", "10")];
+    const summary = linkRefundSummary(payments, [refundOf(TX_A, "1", "10", "confirmed")]);
+    expect(summary.fullyRefunded).toBe(false);
+    expect(
+      linkRefundSummary(payments, [refundOf(TX_A, "1", "10", "confirmed"), refundOf(TX_A, "2", "10", "confirmed")])
+        .fullyRefunded,
+    ).toBe(true);
+  });
+
+  it("tells two payments with the same operation id in different transactions apart", () => {
+    const payments = [payment(TX_A, "1", "10"), payment(TX_B, "1", "10")];
+    const summary = linkRefundSummary(payments, [
+      refundOf(TX_A, "1", "10", "confirmed"),
+      refundOf(TX_A, "1", "10", "confirmed"),
+    ]);
+    expect(summary.fullyRefunded).toBe(false);
+  });
+
+  it("is not fooled by totals that match while one payer got nothing back", () => {
+    // Bad records: 25 went back against a 10 payment. The other payer is still owed.
+    const summary = linkRefundSummary(
+      [payment(TX_A, "1", "10"), payment(TX_B, "7", "15")],
+      [refundOf(TX_A, "1", "25", "confirmed")],
+    );
+    expect(summary).toEqual({ refundedAmount: "25", pendingAmount: "0", fullyRefunded: false });
+  });
+
+  it("adds in stroops", () => {
+    const summary = linkRefundSummary(
+      [payment(TX_A, "1", "0.3")],
+      [
+        refundOf(TX_A, "1", "0.1", "confirmed"),
+        refundOf(TX_A, "1", "0.1", "confirmed"),
+        refundOf(TX_A, "1", "0.1", "confirmed"),
+      ],
+    );
+    expect(summary).toEqual({ refundedAmount: "0.3", pendingAmount: "0", fullyRefunded: true });
+  });
+
+  it("is one stroop short of fully refunded when one stroop is missing", () => {
+    const summary = linkRefundSummary([payment(TX_A, "1", "25")], [refundOf(TX_A, "1", "24.9999999", "confirmed")]);
+    expect(summary).toEqual({ refundedAmount: "24.9999999", pendingAmount: "0", fullyRefunded: false });
   });
 });

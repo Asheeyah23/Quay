@@ -148,3 +148,65 @@ export function validateRefundAmount(requested: string, refundable: string): Ref
   if (!isPositiveAmount(amount) || stroops > limit) return rejected("exceeds_refundable");
   return { ok: true };
 }
+
+/** The part of a recorded payment (`LinkPaymentRecord`) the refund rules read. */
+export interface RefundablePayment {
+  txHash: string;
+  operationId: string;
+  amount: string;
+}
+
+export interface LinkRefundSummary {
+  /** Total of the refunds that are on the ledger (`confirmed`). */
+  refundedAmount: string;
+  /** Total of the refunds on their way: `prepared` or `submitted`. */
+  pendingAmount: string;
+  /** Every payment the link received has been refunded in full by confirmed
+   *  refunds. False for a link nobody has paid. */
+  fullyRefunded: boolean;
+}
+
+const paymentKey = (txHash: string, operationId: string): string => `${txHash}:${operationId}`;
+
+/**
+ * What a link can say about its refunds without a status of its own: the web
+ * shows "Refunded" when `fullyRefunded`, and "Part refunded" when something
+ * was refunded but not everything. Amounts are in the link's asset, which is
+ * the asset of every payment recorded against it. Failed refunds count
+ * nowhere.
+ *
+ * `fullyRefunded` is decided payment by payment, because that is how refunds
+ * are capped: totals that happen to match do not make a link refunded if one
+ * of its payers got nothing back.
+ */
+export function linkRefundSummary(
+  payments: ReadonlyArray<RefundablePayment>,
+  refunds: ReadonlyArray<Pick<Refund, "paymentTxHash" | "paymentOperationId" | "amount" | "status">>,
+): LinkRefundSummary {
+  let refunded = 0n;
+  let pending = 0n;
+  const confirmedByPayment = new Map<string, bigint>();
+  for (const refund of refunds) {
+    if (refund.status === "failed") continue;
+    const stroops = toStroops(refund.amount);
+    if (refund.status === "confirmed") {
+      refunded += stroops;
+      const key = paymentKey(refund.paymentTxHash, refund.paymentOperationId);
+      confirmedByPayment.set(key, (confirmedByPayment.get(key) ?? 0n) + stroops);
+    } else {
+      pending += stroops;
+    }
+  }
+  const fullyRefunded =
+    payments.length > 0 &&
+    payments.every(
+      (payment) =>
+        (confirmedByPayment.get(paymentKey(payment.txHash, payment.operationId)) ?? 0n) >=
+        toStroops(payment.amount),
+    );
+  return {
+    refundedAmount: fromStroops(refunded),
+    pendingAmount: fromStroops(pending),
+    fullyRefunded,
+  };
+}
