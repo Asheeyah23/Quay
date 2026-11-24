@@ -132,6 +132,12 @@ docs:check-env-docs` keeps it in step with the code.
 
 ### Changed
 
+- **Documentation updated for mainnet dashboard and retired testnet API**:
+  updated `docs/PROPOSAL.md` to point the live demo at the mainnet dashboard
+  with payments marked real and cash-out directed to local testnet, updated
+  `docs/RUNBOOK.md` to mark the testnet `quay-api` service as retired (and noted
+  that default uptime checks against it will fail), and updated `docs/MAINNET.md`
+  with Circle's active USDC contract addresses link.
 - **README updated for mainnet dashboard and retired testnet API**: removed
   references and links to the retired testnet API (`quay-api.onrender.com`),
   clarified that the public dashboard ([quay-web.vercel.app](https://quay-web.vercel.app))
