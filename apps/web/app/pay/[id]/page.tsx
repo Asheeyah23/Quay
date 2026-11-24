@@ -1,6 +1,7 @@
 import { api, CheckoutError } from "../../../lib/api";
 import CheckoutClient from "../../components/CheckoutClient";
 import Logo from "../../components/Logo";
+import NetworkChip from "../../components/NetworkChip";
 import { PublicErrorPanel } from "../../components/PublicErrorPanel";
 import ThemeToggle from "../../components/ThemeToggle";
 
@@ -36,6 +37,9 @@ export default async function PayPage({
         <header className="masthead">
           <Logo />
           <span className="masthead__right">
+            {/* Which chain this payment settles on (issue 5.43): the checkout
+                takes real money on mainnet and must say so. */}
+            <NetworkChip />
             <span className="net mono">{data.link.asset.code}</span>
             <ThemeToggle />
           </span>
