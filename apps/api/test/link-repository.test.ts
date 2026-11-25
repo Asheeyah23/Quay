@@ -132,6 +132,7 @@ describe("DrizzleLinkRepository listPaymentsForLink (issue 4.58)", () => {
       txHash: "a".repeat(64),
       operationId: "2001",
       payer: "GALICEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      payerMuxed: null as string | null,
       amount: "6",
       asset: USDC,
       ledger: 100,
@@ -142,6 +143,8 @@ describe("DrizzleLinkRepository listPaymentsForLink (issue 4.58)", () => {
       txHash: "b".repeat(64),
       operationId: "2002",
       payer: "GBOBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      // Bob paid from a sub-account of a custodial wallet (issue 2.14).
+      payerMuxed: "MBOBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBAAAAAAAAAAAACJUQ",
       amount: "4",
       ledger: 101,
       createdAt: 1_000,
