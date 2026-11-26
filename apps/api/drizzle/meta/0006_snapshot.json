@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "cfb0cc17-cd30-45e8-a659-92e3e2cb235c",
+  "id": "a66f9a8e-1c1f-4a8a-9e66-4f6655060466",
   "prevId": "73a0556f-ba65-4314-a2c2-945139129a4c",
   "tables": {
     "anchor_sessions": {
@@ -463,13 +463,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "payer_muxed": {
-          "name": "payer_muxed",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "amount": {
           "name": "amount",
           "type": "text",
@@ -494,6 +487,27 @@
         "ledger": {
           "name": "ledger",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "source_asset_code": {
+          "name": "source_asset_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "source_asset_issuer": {
+          "name": "source_asset_issuer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "source_amount": {
+          "name": "source_amount",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
